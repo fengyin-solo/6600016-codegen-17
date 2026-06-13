@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { MORSE_TABLE, REVERSE_TABLE, textToMorse, morseToText } from '../utils/morse-code'
-import type { TrainMode, HistoryEntry } from '../types'
+import type { TrainMode, HistoryEntry, WaveformSegment, AnnotationInfo } from '../types'
 
 export const useMorseStore = defineStore('morse', () => {
   const inputText = ref('')
@@ -16,10 +16,22 @@ export const useMorseStore = defineStore('morse', () => {
   const userAnswer = ref('')
   const score = ref({ correct: 0, total: 0 })
   const isPlaying = ref(false)
+  const currentPlayTime = ref(0)
+  const waveformSegments = ref<WaveformSegment[]>([])
+  const annotation = ref<AnnotationInfo | null>(null)
+  const selectionStart = ref<number | null>(null)
+  const selectionEnd = ref<number | null>(null)
   let audioCtx: AudioContext | null = null
   let currentOscillator: OscillatorNode | null = null
+  let playStartTime = 0
 
   const dotDuration = computed(() => 1200 / wpm.value)
+
+  const totalDuration = computed(() => {
+    if (waveformSegments.value.length === 0) return 0
+    const last = waveformSegments.value[waveformSegments.value.length - 1]
+    return last.x + last.width
+  })
 
   function getAudioCtx(): AudioContext {
     if (!audioCtx) audioCtx = new AudioContext()
@@ -42,8 +54,17 @@ export const useMorseStore = defineStore('morse', () => {
     })
   }
 
+  function updatePlayPosition() {
+    if (!isPlaying.value) return
+    currentPlayTime.value = Date.now() - playStartTime
+    requestAnimationFrame(updatePlayPosition)
+  }
+
   async function playMorse(morse: string) {
     isPlaying.value = true
+    currentPlayTime.value = 0
+    playStartTime = Date.now()
+    updatePlayPosition()
     const dd = dotDuration.value
     for (const token of morse.split(' ')) {
       if (token === '/') { await sleep(dd * 7); continue }
@@ -54,6 +75,16 @@ export const useMorseStore = defineStore('morse', () => {
       await sleep(dd * 2)
     }
     isPlaying.value = false
+    currentPlayTime.value = 0
+  }
+
+  function stopPlayback() {
+    if (currentOscillator) {
+      currentOscillator.stop()
+      currentOscillator = null
+    }
+    isPlaying.value = false
+    currentPlayTime.value = 0
   }
 
   function sleep(ms: number): Promise<void> {
@@ -90,10 +121,98 @@ export const useMorseStore = defineStore('morse', () => {
     history.value = []
   }
 
+  function setWaveformSegments(segments: WaveformSegment[]) {
+    waveformSegments.value = segments
+  }
+
+  function setSelection(start: number | null, end: number | null) {
+    selectionStart.value = start
+    selectionEnd.value = end
+    if (start !== null && end !== null && start !== end) {
+      calculateAnnotation(start, end)
+    } else {
+      annotation.value = null
+    }
+  }
+
+  function calculateAnnotation(startX: number, endX: number) {
+    const minX = Math.min(startX, endX)
+    const maxX = Math.max(startX, endX)
+    
+    const segmentsInRange = waveformSegments.value.filter(
+      seg => seg.x + seg.width > minX && seg.x < maxX
+    )
+    
+    if (segmentsInRange.length === 0) {
+      annotation.value = null
+      return
+    }
+    
+    let chars = ''
+    let morse = ''
+    let currentChar = ''
+    let currentCode = ''
+    
+    for (const seg of segmentsInRange) {
+      if (seg.type === 'wordGap') {
+        if (currentChar) {
+          chars += currentChar
+          morse += currentCode + ' '
+          currentChar = ''
+          currentCode = ''
+        }
+        chars += ' '
+        morse += '/ '
+      } else if (seg.type === 'charGap') {
+        if (currentChar) {
+          chars += currentChar
+          morse += currentCode + ' '
+          currentChar = ''
+          currentCode = ''
+        }
+      } else if (seg.type === 'dot' || seg.type === 'dash') {
+        if (seg.char && seg.char !== currentChar) {
+          if (currentChar) {
+            chars += currentChar
+            morse += currentCode + ' '
+          }
+          currentChar = seg.char
+          currentCode = seg.symbol || ''
+        } else if (seg.symbol) {
+          currentCode += seg.symbol
+        }
+      }
+    }
+    
+    if (currentChar) {
+      chars += currentChar
+      morse += currentCode
+    }
+    
+    const firstSeg = segmentsInRange[0]
+    const lastSeg = segmentsInRange[segmentsInRange.length - 1]
+    
+    annotation.value = {
+      characters: chars.trim(),
+      morseCode: morse.trim(),
+      duration: (lastSeg.x + lastSeg.width) - firstSeg.x,
+      startTime: firstSeg.x,
+      endTime: lastSeg.x + lastSeg.width
+    }
+  }
+
+  function clearAnnotation() {
+    annotation.value = null
+    selectionStart.value = null
+    selectionEnd.value = null
+  }
+
   return {
     inputText, morseOutput, decodedText, wpm, frequency, volume,
     trainMode, history, quizChar, userAnswer, score, isPlaying,
-    dotDuration, encode, decode, playMorse, playTone,
-    generateQuiz, checkAnswer, resetScore
+    currentPlayTime, waveformSegments, annotation, selectionStart, selectionEnd,
+    dotDuration, totalDuration, encode, decode, playMorse, playTone, stopPlayback,
+    generateQuiz, checkAnswer, resetScore, setWaveformSegments,
+    setSelection, calculateAnnotation, clearAnnotation
   }
 })

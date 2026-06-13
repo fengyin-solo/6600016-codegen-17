@@ -18,10 +18,16 @@
           <h3 class="text-amber-300 font-bold mb-2">文本输入</h3>
           <textarea v-model="store.inputText" class="w-full h-32 bg-gray-800 rounded p-3 text-white resize-none"
             placeholder="输入英文文本..." @input="store.encode()" />
-          <button @click="store.playMorse(store.morseOutput)" :disabled="store.isPlaying"
-            class="mt-2 bg-amber-500 text-black px-4 py-2 rounded hover:bg-amber-400 disabled:opacity-50">
-            {{ store.isPlaying ? '播放中...' : '▶ 播放音频' }}
-          </button>
+          <div class="flex gap-2 mt-2">
+            <button @click="store.playMorse(store.morseOutput)" :disabled="store.isPlaying"
+              class="bg-amber-500 text-black px-4 py-2 rounded hover:bg-amber-400 disabled:opacity-50">
+              {{ store.isPlaying ? '播放中...' : '▶ 播放音频' }}
+            </button>
+            <button v-if="store.isPlaying" @click="store.stopPlayback()"
+              class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-500">
+              ■ 停止
+            </button>
+          </div>
         </div>
         <div class="bg-gray-900 rounded-xl p-4">
           <h3 class="text-amber-300 font-bold mb-2">莫尔斯码输出</h3>
